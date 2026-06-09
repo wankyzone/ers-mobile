@@ -1,240 +1,379 @@
-import { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  ScrollView,
   StyleSheet,
+  Text,
   TextInput,
-  Linking
+  TouchableOpacity,
+  View,
+  Linking,
 } from 'react-native';
-import supabase from '../supabase';
 
+import { useAuth } from '../src/context/AuthContext';
+import {
+  withdrawWithPin,
+  getUserBanks,
+  type BankAccount,
+  type ApiError,
+} from '../src/services/api';
 
-const API = "http://100.115.92.197:3000/errands";
+const BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL ?? 'http://100.115.92.197:3000';
 
-export default function WalletScreen({ user, setTab }: any) {
-  const [wallet, setWallet] = useState<any>({
+// ─── Formatter ─────────────────────────────────
+
+const ngn = new Intl.NumberFormat('en-NG', {
+  style: 'currency',
+  currency: 'NGN',
+});
+
+// ─── Screen ────────────────────────────────────
+
+export default function WalletScreen({ setTab }: any) {
+  const { user } = useAuth();
+
+  const [wallet, setWallet] = useState({
     balance: 0,
-    available_balance: 0
+    available_balance: 0,
   });
 
   const [amount, setAmount] = useState('');
-  const [recipientCode, setRecipientCode] = useState('');
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [pin, setPin] = useState('');
 
-  const fetchWallet = async () => {
-  try {
-    const res = await fetch(`http://100.115.92.197:3000/errands/wallet`, {
-      headers: {
-        'x-user-id': user?.id
+  const [banks, setBanks] = useState<BankAccount[]>([]);
+  const defaultBank = useMemo(
+    () => banks.find((b) => b.is_default),
+    [banks]
+  );
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // ─── Fetch Wallet ───────────────────────────
+
+  const fetchWallet = useCallback(
+    async (opts: { refreshing?: boolean } = {}) => {
+      if (!user?.id) return;
+
+      try {
+        opts.refreshing ? setRefreshing(true) : setLoading(true);
+        setError(null);
+
+        const res = await fetch(`${BASE_URL}/wallet`, {
+          headers: {
+            'x-user-id': user.id,
+            'x-role': user.role,
+          },
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message);
+
+        setWallet({
+          balance: Number(data.balance) || 0,
+          available_balance: Number(data.available_balance) || 0,
+        });
+      } catch (err: any) {
+        setError(err.message || 'Failed to load wallet');
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-    });
+    },
+    [user?.id]
+  );
 
-    const data = await res.json();
+  // ─── Fetch Banks ────────────────────────────
 
-    if (!data) {
-  console.log("⚠️ NO WALLET DATA");
-  return;
-}
-
-    setWallet(data);
-  } catch (e) {
-    console.log("WALLET FETCH ERROR:", e);
-  }
-};
+  const fetchBanks = async () => {
+    try {
+      const data = await getUserBanks();
+      setBanks(data);
+    } catch {}
+  };
 
   useEffect(() => {
-  const interval = setInterval(() => {
     fetchWallet();
-  }, 3000); // poll every 3s
+    fetchBanks();
 
-  return () => clearInterval(interval);
-}, []);
+    const interval = setInterval(fetchWallet, 8000);
+    return () => clearInterval(interval);
+  }, [fetchWallet]);
 
-  /* ================= ADD MONEY ================= */
+  // ─── Add Money ─────────────────────────────
+
   const addMoney = async () => {
-  const res = await fetch(`${API}/paystack/initialize`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      email: user.email,
-      amount: Number(amount),
-      user_id: user.id
-    })
-  });
+    if (!amount || Number(amount) <= 0) {
+      return Alert.alert('Invalid amount');
+    }
 
-  const data = await res.json();
-
-  if (!data.status) return alert("Init failed");
-
-  const url = data.data.authorization_url;
-  const ref = data.data.reference;
-
-  // open payment
-  await Linking.openURL(url);
-
-  // ⚠️ AFTER PAYMENT (fallback polling)
-  setTimeout(async () => {
-    await fetch(`${API}/paystack/verify/${ref}`);
-    fetchWallet();
-  }, 5000);
-};
-
-  /* ================= WITHDRAW ================= */
-  const withdraw = async () => {
     try {
-      const res = await fetch(`${API}/paystack/withdraw`, {
+      setProcessing(true);
+
+      const res = await fetch(`${BASE_URL}/paystack/initialize`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          email: user?.email,
           amount: Number(amount),
-          recipient_code: recipientCode,
-          user_id: user.id
-        })
+          user_id: user?.id,
+        }),
       });
 
       const data = await res.json();
+      if (!data.status) throw new Error('Payment failed');
 
-      if (data.error) return alert(data.error);
+      await Linking.openURL(data.data.authorization_url);
 
-      if (!user) return null;
+      setTimeout(fetchWallet, 5000);
 
-      alert("Withdrawal started");
-      fetchWallet();
-
-    } catch {
-      alert("Withdraw failed");
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
+    } finally {
+      setProcessing(false);
+      setAmount('');
     }
   };
 
+  // ─── Withdraw (PIN + OTP FLOW) ─────────────
+
+  const withdraw = async () => {
+    if (!withdrawAmount || Number(withdrawAmount) <= 0) {
+      return Alert.alert('Invalid amount');
+    }
+
+    if (!defaultBank) {
+      return Alert.alert('No default bank selected');
+    }
+
+    if (!pin || pin.length < 4) {
+      return Alert.alert('Enter your PIN');
+    }
+
+    try {
+      setProcessing(true);
+
+      const res = await withdrawWithPin(
+        Number(withdrawAmount),
+        pin
+      );
+
+      // 🚨 OTP REQUIRED FLOW
+      if ((res as any).requireOtp) {
+        setTab('otp-screen');
+        return;
+      }
+
+      Alert.alert('Success', res.message || 'Withdrawal started');
+      fetchWallet();
+
+    } catch (err) {
+      Alert.alert(
+        'Error',
+        (err as ApiError)?.message || 'Withdraw failed'
+      );
+    } finally {
+      setProcessing(false);
+      setWithdrawAmount('');
+      setPin('');
+    }
+  };
+
+  // ─── Render ────────────────────────────────
+
+  if (loading) {
+    return (
+      <View style={[s.container, s.centered]}>
+        <ActivityIndicator color="#22c55e" size="large" />
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={s.container}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => fetchWallet({ refreshing: true })}
+          tintColor="#22c55e"
+        />
+      }
+    >
+      <Text style={s.title}>Wallet</Text>
 
-      <Text style={styles.title}>Wallet</Text>
+      {/* Balance */}
+      <View style={s.balanceCard}>
+        <Text style={s.balanceLabel}>Available Balance</Text>
+        <Text style={s.balanceAmount}>
+          {ngn.format(wallet.balance)}
+        </Text>
+      </View>
 
-      <Text style={styles.amount}>₦{wallet.balance}</Text>
+      {/* Default Bank */}
+      <View style={s.card}>
+        <Text style={s.label}>Payout Account</Text>
 
-      {/* ===== ADD MONEY ===== */}
-      <View style={styles.card}>
-        <Text style={styles.label}>Add Money</Text>
+        {defaultBank ? (
+          <Text style={s.bank}>
+            {defaultBank.bank_name} • {defaultBank.account_number}
+          </Text>
+        ) : (
+          <Text style={s.error}>No default bank set</Text>
+        )}
+
+        <TouchableOpacity onPress={() => setTab('saved-banks')}>
+          <Text style={s.link}>Manage Banks →</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Add Money */}
+      <View style={s.card}>
+        <Text style={s.label}>Fund Wallet</Text>
 
         <TextInput
           placeholder="Amount"
           placeholderTextColor="#94a3b8"
           value={amount}
-          onChangeText={setAmount}
-          style={styles.input}
+          onChangeText={(v: string) => setAmount(v)}
+          keyboardType="numeric"
+          style={s.input}
         />
 
-        <TouchableOpacity style={styles.button} onPress={addMoney}>
-          <Text style={styles.text}>Fund Wallet</Text>
+        <TouchableOpacity
+          style={s.button}
+          onPress={addMoney}
+          disabled={processing}
+        >
+          {processing
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={s.text}>Fund</Text>}
         </TouchableOpacity>
       </View>
 
-      {/* ===== WITHDRAW ===== */}
-      <View style={styles.card}>
-        <Text style={styles.label}>Withdraw</Text>
+      {/* Withdraw */}
+      <View style={s.card}>
+        <Text style={s.label}>Withdraw</Text>
 
         <TextInput
           placeholder="Amount"
           placeholderTextColor="#94a3b8"
-          value={amount}
-          onChangeText={setAmount}
-          style={styles.input}
+          value={withdrawAmount}
+          onChangeText={(v: string) => setWithdrawAmount(v)}
+          keyboardType="numeric"
+          style={s.input}
         />
 
         <TextInput
-          placeholder="Recipient Code"
+          placeholder="PIN"
           placeholderTextColor="#94a3b8"
-          value={recipientCode}
-          onChangeText={setRecipientCode}
-          style={styles.input}
+          secureTextEntry
+          value={pin}
+          onChangeText={(v: string) => setPin(v)}
+          style={s.input}
         />
 
-        <TouchableOpacity style={styles.buttonDanger} onPress={withdraw}>
-          <Text style={styles.text}>Withdraw</Text>
+        <TouchableOpacity
+          style={s.buttonDanger}
+          onPress={withdraw}
+          disabled={processing}
+        >
+          {processing
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={s.text}>Withdraw</Text>}
         </TouchableOpacity>
       </View>
 
-      {/* ===== ANALYTICS ===== */}
-      <View style={styles.card}>
-        <Text style={styles.label}>Analytics</Text>
-
-        <Text style={styles.text}>
-          Total Earned: ₦{wallet.available_balance}
-        </Text>
-
-        <Text style={styles.text}>
-          Total Deposited: ₦{wallet.balance}
-        </Text>
-      </View>
-
-      {/* NAVIGATION */}
+      {/* Navigation */}
       <TouchableOpacity onPress={() => setTab('transactions')}>
-        <Text style={styles.link}>View Transactions →</Text>
+        <Text style={s.link}>View Transactions →</Text>
       </TouchableOpacity>
-
-      <TouchableOpacity onPress={() => setTab('client')}>
-        <Text style={styles.link}>← Back</Text>
-      </TouchableOpacity>
-
-    </View>
+    </ScrollView>
   );
 }
 
-/* ================= STYLES ================= */
+// ─── Styles ─────────────────────────────────
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#020617',
-    padding: 20
-  },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#020617', padding: 20 },
+
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
   title: {
     color: 'white',
-    fontSize: 24
+    fontSize: 26,
+    fontWeight: '700',
+    marginBottom: 16,
   },
-  amount: {
-    color: 'white',
-    fontSize: 30,
-    marginVertical: 20
+
+  balanceCard: {
+    backgroundColor: '#22c55e',
+    padding: 22,
+    borderRadius: 16,
+    marginBottom: 20,
   },
+
+  balanceLabel: { color: '#052e16' },
+
+  balanceAmount: {
+    color: '#052e16',
+    fontSize: 28,
+    fontWeight: 'bold',
+  },
+
   card: {
     backgroundColor: '#0f172a',
-    padding: 15,
-    borderRadius: 12,
-    marginVertical: 10
+    padding: 16,
+    borderRadius: 14,
+    marginBottom: 12,
   },
+
   label: {
     color: '#94a3b8',
-    marginBottom: 10
+    marginBottom: 10,
   },
+
   input: {
     backgroundColor: '#020617',
     color: 'white',
     padding: 12,
-    borderRadius: 8,
-    marginBottom: 10
+    borderRadius: 10,
+    marginBottom: 10,
   },
+
   button: {
     backgroundColor: '#22c55e',
     padding: 14,
-    borderRadius: 10,
-    alignItems: 'center'
+    borderRadius: 12,
+    alignItems: 'center',
   },
+
   buttonDanger: {
     backgroundColor: '#ef4444',
     padding: 14,
-    borderRadius: 10,
-    alignItems: 'center'
+    borderRadius: 12,
+    alignItems: 'center',
   },
-  text: {
-    color: 'white',
-    fontWeight: 'bold'
-  },
+
+  text: { color: 'white', fontWeight: '700' },
+
   link: {
     color: '#22c55e',
-    marginTop: 15
-  }
+    marginTop: 14,
+  },
+
+  bank: {
+    color: 'white',
+    fontWeight: '600',
+  },
+
+  error: {
+    color: '#ef4444',
+  },
 });

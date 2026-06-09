@@ -1,218 +1,339 @@
-import { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Platform,
 } from 'react-native';
 
-const API = "http://100.115.92.197:3000/errands";
+import io from 'socket.io-client';
 
-type Errand = {
-  id: string;
-  title: string;
-  description: string;
-  status: string;
-  price: number;
-  client_id: string;
-  assigned_runner_id?: string | null;
-  escrow_status?: string;
+import { useAuth } from '../src/context/AuthContext';
+import {
+  getClientErrands,
+  confirmErrand,
+  type Errand,
+} from '../src/services/api';
+
+// ─── SAFE MAP IMPORT ─────────────────────────────
+
+let MapView: any = null;
+let Marker: any = null;
+let Polyline: any = null;
+
+if (Platform.OS !== 'web') {
+  const maps = require('react-native-maps');
+  MapView = maps.default;
+  Marker = maps.Marker;
+  Polyline = maps.Polyline;
+}
+
+// ─── CONFIG ─────────────────────────────────────
+
+const SOCKET_URL = 'http://100.115.92.197:3000';
+
+const socket = io(SOCKET_URL, {
+  transports: ['websocket'],
+});
+
+// ─── THEME ─────────────────────────────────────
+
+const C = {
+  bg: '#020617',
+  card: '#0f172a',
+  green: '#22c55e',
+  text: '#f1f5f9',
+  muted: '#94a3b8',
 };
 
-export default function ClientScreen({ user }: any) {
-  const [errands, setErrands] = useState<Errand[]>([]);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [price, setPrice] = useState('');
+// ─── HELPERS ───────────────────────────────────
 
-  /* ================= FETCH ================= */
-  const fetchErrands = async () => {
-    try {
-      const res = await fetch(API, {
-        headers: {
-          'x-user-id': user?.id,
-          'x-role': 'client'
-        }
-      });
+const ngn = new Intl.NumberFormat('en-NG', {
+  style: 'currency',
+  currency: 'NGN',
+});
 
-      const data = await res.json();
-      setErrands(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.log("CLIENT FETCH ERROR:", err);
-    }
+const getAmount = (e: Errand) => e.budget ?? e.price ?? 0;
+
+const getCoords = (location?: string | null) => {
+  if (!location) return null;
+
+  return {
+    latitude: 6.5244 + Math.random() * 0.01,
+    longitude: 3.3792 + Math.random() * 0.01,
   };
+};
 
-  /* 🔥 AUTO REFRESH */
-  useEffect(() => {
-    fetchErrands();
+// ─── SCREEN ───────────────────────────────────
 
-    const interval = setInterval(fetchErrands, 5000);
-    return () => clearInterval(interval);
+export default function ClientScreen() {
+  const { user } = useAuth();
+
+  const mapRef = useRef<any>(null);
+
+  const [errands, setErrands] = useState<Errand[]>([]);
+  const [runnerLocation, setRunnerLocation] = useState<any>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+
+  // ─── FETCH ─────────────────────────────────
+
+  const fetchErrands = useCallback(async () => {
+    try {
+      const data = await getClientErrands();
+      setErrands(data);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  /* ================= ACTIONS ================= */
-
-  const createErrand = async () => {
-    if (!title || !price) return alert("Missing fields");
-
-    await fetch(API, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-client-id': user?.id
-      },
-      body: JSON.stringify({
-        title,
-        description,
-        price: Number(price)
-      })
-    });
-
-    setTitle('');
-    setDescription('');
-    setPrice('');
+  useEffect(() => {
     fetchErrands();
-  };
+  }, []);
 
-  const confirm = async (id: string) => {
-    await fetch(`${API}/${id}/confirm`, {
-      method: 'POST',
-      headers: {
-        'x-client-id': user?.id
+  // ─── ACTIVE ERRAND ─────────────────────────
+
+  const activeErrand = useMemo(
+    () => errands.find((e) => e.status === 'accepted'),
+    [errands]
+  );
+
+  const pickupCoords = getCoords(activeErrand?.pickup_location);
+  const deliveryCoords = getCoords(activeErrand?.delivery_location);
+
+  // ─── SOCKET ───────────────────────────────
+
+  useEffect(() => {
+    if (!activeErrand) return;
+
+    socket.emit('join:errand', activeErrand.id);
+
+    const handler = (data: any) => {
+      const loc = {
+        latitude: data.lat,
+        longitude: data.lng,
+      };
+
+      setRunnerLocation(loc);
+
+      if (mapRef.current && Platform.OS !== 'web') {
+        mapRef.current.animateToRegion({
+          ...loc,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        });
       }
-    });
+    };
 
-    fetchErrands();
+    socket.on('location:update', handler);
+
+    return () => {
+      socket.off('location:update', handler);
+    };
+  }, [activeErrand]);
+
+  // ─── CONFIRM ─────────────────────────────
+
+  const handleConfirm = (id: string) => {
+    Alert.alert('Confirm Delivery', 'Mark as completed?', [
+      { text: 'Cancel' },
+      {
+        text: 'Confirm',
+        onPress: async () => {
+          try {
+            setConfirmingId(id);
+
+            const updated = await confirmErrand(id);
+
+            setErrands((prev) =>
+              prev.map((e) => (e.id === updated.id ? updated : e))
+            );
+          } finally {
+            setConfirmingId(null);
+          }
+        },
+      },
+    ]);
   };
 
-  /* ================= FILTERS ================= */
+  // ─── MAP ─────────────────────────────────
 
-  const activeOrders = errands.filter(
-    (e) => e.status !== 'confirmed'
-  );
+  const TrackingMap = () => {
+    if (
+      Platform.OS === 'web' ||
+      !MapView ||
+      !pickupCoords ||
+      !deliveryCoords
+    ) {
+      return null;
+    }
 
-  const awaitingConfirmation = errands.filter(
-    (e) => e.escrow_status === 'awaiting_confirmation'
-  );
+    return (
+      <View style={styles.mapContainer}>
+        <MapView
+          ref={mapRef}
+          style={StyleSheet.absoluteFillObject}
+          initialRegion={{
+            latitude: pickupCoords.latitude,
+            longitude: pickupCoords.longitude,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+          }}
+        >
+          <Marker coordinate={pickupCoords} title="Pickup" />
 
-  const completedOrders = errands.filter(
-    (e) => e.status === 'confirmed'
-  );
+          <Marker
+            coordinate={deliveryCoords}
+            title="Delivery"
+            pinColor="green"
+          />
 
-  /* ================= CARD ================= */
+          {runnerLocation && (
+            <Marker
+              coordinate={runnerLocation}
+              title="Runner"
+              pinColor="blue"
+            />
+          )}
 
-  const renderCard = (e: Errand) => (
-    <View key={e.id} style={styles.card}>
-      <Text style={styles.text}>{e.title}</Text>
-      <Text style={styles.sub}>{e.description}</Text>
-      <Text style={styles.amount}>₦{e.price}</Text>
+          <Polyline
+            coordinates={[pickupCoords, deliveryCoords]}
+            strokeColor="#22c55e"
+            strokeWidth={3}
+          />
+        </MapView>
+      </View>
+    );
+  };
 
-      {/* 🔥 STATUS */}
-      <Text style={styles.status}>
-        {e.status.toUpperCase()}
-      </Text>
+  // ─── UI ─────────────────────────────────
 
-      {/* 🔥 CONFIRM BUTTON */}
-      {e.escrow_status === 'awaiting_confirmation' && (
-        <TouchableOpacity style={styles.button} onPress={() => confirm(e.id)}>
-          <Text style={styles.text}>Confirm</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-
-  const renderEmpty = (text: string) => (
-    <Text style={styles.empty}>{text}</Text>
-  );
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color={C.green} size="large" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Client</Text>
+      <Text style={styles.header}>My Errands</Text>
 
-      {/* CREATE */}
-      <View style={styles.card}>
-        <TextInput placeholder="Title" value={title} onChangeText={setTitle} style={styles.input}/>
-        <TextInput placeholder="Description" value={description} onChangeText={setDescription} style={styles.input}/>
-        <TextInput placeholder="Price" value={price} onChangeText={setPrice} style={styles.input}/>
+      {activeErrand && (
+        <>
+          <TrackingMap />
 
-        <TouchableOpacity style={styles.button} onPress={createErrand}>
-          <Text style={styles.text}>Create Errand</Text>
-        </TouchableOpacity>
-      </View>
+          <View style={styles.trackCard}>
+            <Text style={styles.title}>{activeErrand.title}</Text>
 
-      <ScrollView>
+            <Text style={styles.route}>
+              📍 {activeErrand.pickup_location}
+            </Text>
 
-        {/* ACTIVE */}
-        <Text style={styles.section}>Active Orders</Text>
-        {activeOrders.length ? activeOrders.map(renderCard) : renderEmpty("No active orders")}
+            <Text style={styles.route}>
+              🏁 {activeErrand.delivery_location}
+            </Text>
 
-        {/* AWAITING */}
-        <Text style={styles.section}>Awaiting Confirmation</Text>
-        {awaitingConfirmation.length
-          ? awaitingConfirmation.map(renderCard)
-          : renderEmpty("Nothing to confirm yet")}
+            <Text style={styles.amount}>
+              {ngn.format(getAmount(activeErrand))}
+            </Text>
 
-        {/* COMPLETED */}
-        <Text style={styles.section}>Completed</Text>
-        {completedOrders.length
-          ? completedOrders.map(renderCard)
-          : renderEmpty("No completed errands yet")}
+            <TouchableOpacity
+              style={styles.confirmBtn}
+              onPress={() => handleConfirm(activeErrand.id)}
+            >
+              {confirmingId === activeErrand.id ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.btnText}>Confirm Delivery</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
 
-      </ScrollView>
+      <FlatList
+        data={errands.filter((e) => e.status !== 'accepted')}
+        keyExtractor={(item) => item.id}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={fetchErrands}
+          />
+        }
+        renderItem={({ item }) => (
+          <View style={styles.card}>
+            <Text style={styles.title}>{item.title}</Text>
+            <Text style={styles.route}>
+              {item.pickup_location} → {item.delivery_location}
+            </Text>
+            <Text style={styles.amount}>
+              {ngn.format(getAmount(item))}
+            </Text>
+          </View>
+        )}
+      />
     </View>
   );
 }
 
-/* ================= STYLES ================= */
+// ─── STYLES ─────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617', padding: 20 },
-  title: { color: 'white', fontSize: 24, marginBottom: 10 },
+  container: { flex: 1, backgroundColor: C.bg, padding: 20 },
 
-  section: {
-    color: '#22c55e',
-    marginTop: 15,
-    fontWeight: 'bold'
+  header: {
+    color: 'white',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 10,
   },
+
+  mapContainer: {
+    height: 250,
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+
+  trackCard: {
+    backgroundColor: '#052e16',
+    padding: 15,
+    borderRadius: 16,
+    marginBottom: 15,
+  },
+
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   card: {
-    backgroundColor: '#0f172a',
+    backgroundColor: C.card,
     padding: 15,
     borderRadius: 12,
-    marginVertical: 8
+    marginBottom: 10,
   },
 
-  input: {
-    backgroundColor: '#020617',
-    color: 'white',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 8
-  },
+  title: { color: 'white', fontWeight: 'bold' },
 
-  button: {
+  route: { color: C.muted },
+
+  amount: { color: C.green, marginTop: 5 },
+
+  confirmBtn: {
     backgroundColor: '#22c55e',
     padding: 12,
     borderRadius: 10,
+    marginTop: 10,
     alignItems: 'center',
-    marginTop: 10
   },
 
-  text: { color: 'white', fontWeight: 'bold' },
-  sub: { color: '#94a3b8' },
-
-  amount: {
-    color: 'white',
-    marginTop: 5,
-    fontWeight: 'bold'
-  },
-
-  status: {
-    marginTop: 6,
-    color: '#22c55e',
-    fontSize: 12,
-    fontWeight: 'bold'
-  },
-
-  empty: {
-    color: '#64748b',
-    marginVertical: 5
-  }
+  btnText: { color: 'white', fontWeight: 'bold' },
 });

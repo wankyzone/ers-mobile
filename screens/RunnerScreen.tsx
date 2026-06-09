@@ -1,196 +1,377 @@
-import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+// screens/RunnerScreen.tsx — FINTECH + MARKETPLACE UPGRADE
 
-const API = "http://100.115.92.197:3000/errands";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
-type Errand = {
-  id: string;
-  title: string;
-  description: string;
-  status: string;
-  price: number;
-  client_id: string;
-  assigned_runner_id?: string | null;
-  escrow_status?: string;
+import { useAuth } from '../src/context/AuthContext';
+import {
+  acceptErrand,
+  getOpenErrands,
+  type ApiError,
+  type Errand,
+} from '../src/services/api';
+
+// ─── Tokens ─────────────────────────
+
+const C = {
+  bg: '#020617',
+  card: '#0f172a',
+  border: '#1e293b',
+  green: '#22c55e',
+  red: '#ef4444',
+  textPri: '#f1f5f9',
+  textSec: '#94a3b8',
+  textMute: '#475569',
 };
 
-export default function RunnerScreen({ user }: any) {
-  const [errands, setErrands] = useState<Errand[]>([]);
+// ─── Helpers ───────────────────────
 
-  /* ================= FETCH ================= */
-  const fetchErrands = async () => {
-    try {
-      const res = await fetch(API, {
-        headers: {
-          'x-user-id': user?.id,
-          'x-role': 'runner'
-        }
-      });
+function resolveAmount(errand: Errand): number {
+  const b = Number(errand.budget);
+  const p = Number(errand.price);
 
-      const data = await res.json();
-      setErrands(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.log("RUNNER FETCH ERROR:", err);
-    }
-  };
+  if (!isNaN(b) && b > 0) return b;
+  if (!isNaN(p) && p > 0) return p;
+  return 0;
+}
 
-  /* 🔥 AUTO REFRESH */
-  useEffect(() => {
-    fetchErrands();
+const ngn = new Intl.NumberFormat('en-NG', {
+  style: 'currency',
+  currency: 'NGN',
+  minimumFractionDigits: 0,
+});
 
-    const interval = setInterval(fetchErrands, 5000);
-    return () => clearInterval(interval);
-  }, []);
+function formatNGN(v: number) {
+  return ngn.format(v);
+}
 
-  /* ================= ACTIONS ================= */
+// ─── Card ──────────────────────────
 
-  const accept = async (id: string) => {
-    await fetch(`${API}/${id}/accept`, {
-      method: 'POST',
-      headers: {
-        'x-runner-id': user?.id
-      }
-    });
+interface CardProps {
+  errand: Errand;
+  onAccept: (id: string) => void;
+  accepting: boolean;
+}
 
-    fetchErrands();
-  };
-
-  const complete = async (id: string) => {
-    await fetch(`${API}/${id}/complete`, {
-      method: 'POST',
-      headers: {
-        'x-runner-id': user?.id
-      }
-    });
-
-    fetchErrands();
-  };
-
-  /* ================= FILTERS ================= */
-
-  const availableJobs = errands.filter(
-    (e) => e.status === 'created' && !e.assigned_runner_id
-  );
-
-  const myActiveJob = errands.filter(
-    (e) =>
-      e.assigned_runner_id === user.id &&
-      e.status === 'accepted'
-  );
-
-  const completedJobs = errands.filter(
-    (e) =>
-      e.assigned_runner_id === user.id &&
-      e.status === 'completed'
-  );
-
-  /* ================= CARD ================= */
-
-  const renderCard = (e: Errand) => (
-    <View key={e.id} style={styles.card}>
-      <Text style={styles.text}>{e.title}</Text>
-      <Text style={styles.sub}>{e.description}</Text>
-      <Text style={styles.amount}>₦{e.price}</Text>
-
-      {/* 🔥 STATUS */}
-      <Text style={styles.status}>
-        {e.status.toUpperCase()}
-      </Text>
-
-      {/* ACCEPT */}
-      {e.status === 'created' && !e.assigned_runner_id && (
-        <TouchableOpacity style={styles.button} onPress={() => accept(e.id)}>
-          <Text style={styles.text}>Accept</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* COMPLETE */}
-      {e.status === 'accepted' && e.assigned_runner_id === user?.id && (
-        <TouchableOpacity style={styles.button} onPress={() => complete(e.id)}>
-          <Text style={styles.text}>Complete</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-
-  const renderEmpty = (text: string) => (
-    <Text style={styles.empty}>{text}</Text>
-  );
+const ErrandCard = React.memo(function ErrandCard({
+  errand,
+  onAccept,
+  accepting,
+}: CardProps) {
+  const amount = resolveAmount(errand);
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Runner</Text>
+    <View style={card.wrapper}>
+      <View style={card.body}>
+        <Text style={card.title}>{errand.title}</Text>
 
-      <ScrollView>
+        {(errand.pickup_location || errand.delivery_location) && (
+          <View style={card.routeBox}>
+            <Text style={card.routeText}>
+              📍 {errand.pickup_location ?? '—'}
+            </Text>
+            <Text style={card.routeText}>
+              🏁 {errand.delivery_location ?? '—'}
+            </Text>
+          </View>
+        )}
 
-        {/* AVAILABLE */}
-        <Text style={styles.section}>Available Jobs</Text>
-        {availableJobs.length
-          ? availableJobs.map(renderCard)
-          : renderEmpty("No jobs available")}
+        {!!errand.description && (
+          <Text style={card.desc} numberOfLines={2}>
+            {errand.description}
+          </Text>
+        )}
 
-        {/* ACTIVE */}
-        <Text style={styles.section}>My Active Job</Text>
-        {myActiveJob.length
-          ? myActiveJob.map(renderCard)
-          : renderEmpty("No active job")}
+        <Text style={card.amount}>
+          {amount > 0 ? formatNGN(amount) : 'Amount TBD'}
+        </Text>
+      </View>
 
-        {/* COMPLETED */}
-        <Text style={styles.section}>Completed Jobs</Text>
-        {completedJobs.length
-          ? completedJobs.map(renderCard)
-          : renderEmpty("No completed jobs yet")}
+      <TouchableOpacity
+        style={[card.btn, accepting && card.disabled]}
+        onPress={() => onAccept(errand.id)}
+        disabled={accepting}
+        activeOpacity={0.8}
+      >
+        {accepting
+          ? <ActivityIndicator color="#fff" size="small" />
+          : <Text style={card.btnText}>Accept</Text>}
+      </TouchableOpacity>
+    </View>
+  );
+});
 
-      </ScrollView>
+// ─── Screen ───────────────────────
+
+export default function RunnerScreen() {
+  const { user } = useAuth();
+
+  const [errands, setErrands] = useState<Errand[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const acceptLock = useRef(false);
+
+  // ─── Fetch ─────────────────────
+
+  const fetchErrands = useCallback(
+    async (opts: { refreshing?: boolean } = {}) => {
+      if (!user?.id) return;
+
+      try {
+        opts.refreshing ? setRefreshing(true) : setLoading(true);
+        setError(null);
+
+        const data = await getOpenErrands();
+        setErrands(Array.isArray(data) ? data : []);
+      } catch (err) {
+        setError((err as ApiError)?.message ?? 'Failed to load errands');
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [user?.id]
+  );
+
+  useEffect(() => {
+    fetchErrands();
+  }, [fetchErrands]);
+
+  // ─── Accept ─────────────────────
+
+  const handleAccept = useCallback(
+    (id: string) => {
+      if (acceptLock.current) return;
+
+      Alert.alert('Accept Errand', 'Take this job?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Accept',
+          onPress: async () => {
+            acceptLock.current = true;
+            setAcceptingId(id);
+
+            const snapshot = errands;
+            setErrands(prev => prev.filter(e => e.id !== id));
+
+            try {
+              await acceptErrand(id);
+            } catch (err) {
+              setErrands(snapshot);
+              setError(
+                (err as ApiError)?.message ?? 'Accept failed'
+              );
+            } finally {
+              acceptLock.current = false;
+              setAcceptingId(null);
+            }
+          },
+        },
+      ]);
+    },
+    [errands]
+  );
+
+  // ─── List ───────────────────────
+
+  const renderItem = useCallback(
+    ({ item }: { item: Errand }) => (
+      <ErrandCard
+        errand={item}
+        onAccept={handleAccept}
+        accepting={acceptingId === item.id}
+      />
+    ),
+    [handleAccept, acceptingId]
+  );
+
+  const empty = useMemo(() => (
+    <View style={s.centered}>
+      <Text style={s.emptyTitle}>No errands available</Text>
+      <Text style={s.emptyHint}>Pull down to refresh</Text>
+    </View>
+  ), []);
+
+  // ─── Render ─────────────────────
+
+  if (loading) {
+    return (
+      <View style={[s.container, s.centered]}>
+        <ActivityIndicator color={C.green} size="large" />
+      </View>
+    );
+  }
+
+  return (
+    <View style={s.container}>
+      {/* HEADER */}
+      <View style={s.header}>
+        <Text style={s.title}>Available Errands</Text>
+
+        <View style={s.headerRight}>
+          <Text style={s.count}>{errands.length}</Text>
+
+          <TouchableOpacity onPress={() => fetchErrands()}>
+            <Text style={s.refresh}>↻</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {error && <Text style={s.error}>{error}</Text>}
+
+      <FlatList
+        data={errands}
+        keyExtractor={(i) => i.id}
+        renderItem={renderItem}
+        ListEmptyComponent={empty}
+        contentContainerStyle={
+          errands.length === 0 ? s.fill : s.list
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => fetchErrands({ refreshing: true })}
+            tintColor={C.green}
+          />
+        }
+      />
     </View>
   );
 }
 
-/* ================= STYLES ================= */
+// ─── Styles ───────────────────────
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617', padding: 20 },
-  title: { color: 'white', fontSize: 24 },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg, padding: 20 },
 
-  section: {
-    color: '#22c55e',
-    marginTop: 15,
-    fontWeight: 'bold'
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
 
-  card: {
-    backgroundColor: '#0f172a',
-    padding: 15,
-    borderRadius: 12,
-    marginVertical: 8
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
 
-  text: { color: 'white', fontWeight: 'bold' },
-  sub: { color: '#94a3b8' },
+  count: {
+    color: C.green,
+    fontWeight: '700',
+    fontSize: 16,
+  },
+
+  refresh: {
+    color: C.textSec,
+    fontSize: 18,
+  },
+
+  title: {
+    color: C.textPri,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  list: { paddingBottom: 40 },
+  fill: { flex: 1 },
+
+  emptyTitle: {
+    color: C.textSec,
+    fontWeight: '600',
+  },
+
+  emptyHint: {
+    color: C.textMute,
+    marginTop: 6,
+  },
+
+  error: {
+    backgroundColor: C.red,
+    color: '#fff',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+});
+
+const card = StyleSheet.create({
+  wrapper: {
+    backgroundColor: C.card,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    flexDirection: 'row',
+    gap: 12,
+  },
+
+  body: { flex: 1 },
+
+  title: {
+    color: C.textPri,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+
+  routeBox: { marginTop: 6 },
+  routeText: {
+    color: C.textSec,
+    fontSize: 12,
+  },
+
+  desc: {
+    color: C.textMute,
+    fontSize: 12,
+    marginTop: 4,
+  },
 
   amount: {
-    color: 'white',
-    marginTop: 5,
-    fontWeight: 'bold'
-  },
-
-  status: {
+    color: C.green,
+    fontWeight: '800',
+    fontSize: 16,
     marginTop: 6,
-    color: '#22c55e',
-    fontSize: 12,
-    fontWeight: 'bold'
   },
 
-  button: {
-    backgroundColor: '#22c55e',
-    padding: 12,
+  btn: {
+    backgroundColor: C.green,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderRadius: 10,
-    marginTop: 10,
-    alignItems: 'center'
+    alignSelf: 'center',
   },
 
-  empty: {
-    color: '#64748b',
-    marginVertical: 5
-  }
+  disabled: { opacity: 0.5 },
+
+  btnText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
 });
