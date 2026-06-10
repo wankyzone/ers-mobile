@@ -1,45 +1,19 @@
-import { io, Socket } from 'socket.io-client';
-import { getDeviceId } from '../utils/device';
+import { io } from 'socket.io-client';
 
-const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL!;
 
-let socket: Socket | null = null;
+let socket: any;
 
-export async function connectSocket(userId: string): Promise<Socket> {
-  if (socket) return socket;
-
-  const deviceId = await getDeviceId();
-
+export function connectSocket(userId: string) {
   socket = io(BASE_URL, {
     transports: ['websocket'],
-    query: {
-      userId,
-      deviceId,
-    },
   });
 
-  socket.on('connect', () => {
-    console.log('⚡ Socket connected');
-
-    // 🔥 JOIN USER ROOM (IMPORTANT)
-    socket?.emit('join:user', userId);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('❌ Socket disconnected');
-  });
+  socket.emit('join:user', userId);
 
   return socket;
 }
 
-export function getSocket(): Socket | null {
+export function getSocket() {
   return socket;
-}
-
-export function disconnectSocket() {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
 }
