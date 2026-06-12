@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../src/context/AuthContext';
 import {
@@ -122,20 +123,22 @@ export default function ProfileScreen({ setTab }: any) {
   // ─── UI ─────────────────────────
 
   return (
-    <ScrollView
-      style={s.container}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => load(true)}
-          tintColor={C.green}
-        />
-      }
-    >
-      {/* HEADER */}
-      <View style={s.header}>
-        <Text style={s.title}>Profile</Text>
-      </View>
+    <SafeAreaView style={s.safeArea} edges={['top', 'left', 'right']}>
+      <ScrollView
+        style={s.container}
+        contentContainerStyle={s.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => load(true)}
+            tintColor={C.green}
+          />
+        }
+      >
+        {/* HEADER */}
+        <View style={s.header}>
+          <Text style={s.title}>Profile</Text>
+        </View>
 
       {/* PROFILE CARD */}
       <View style={s.profileCard}>
@@ -184,8 +187,9 @@ export default function ProfileScreen({ setTab }: any) {
           : <Text style={s.logoutText}>Log Out</Text>}
       </TouchableOpacity>
 
-      <Text style={s.version}>ERS v1.0</Text>
-    </ScrollView>
+        <Text style={s.version}>ERS v1.0</Text>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -223,10 +227,19 @@ function Menu({ label, onPress }: any) {
 // ─── Styles ─────────────────────
 
 const s = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: C.bg,
+  },
+
   container: {
     flex: 1,
     backgroundColor: C.bg,
+  },
+
+  content: {
     padding: 20,
+    paddingBottom: 32,
   },
 
   header: { marginBottom: 20 },

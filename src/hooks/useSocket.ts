@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
+import io, { Socket } from 'socket.io-client';
 
-export function useSocket(url: string) {
-  const socketRef = useRef<any>(null);
+export const useSocket = (url: string) => {
+  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
     if (!url) return;
@@ -17,4 +17,4 @@ export function useSocket(url: string) {
   }, [url]);
 
   return socketRef;
-}
+};

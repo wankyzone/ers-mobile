@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../src/context/AuthContext';
 import { getClientErrands, confirmErrand } from '../src/services/api';
@@ -50,6 +51,7 @@ export default function ClientScreen() {
     if (!activeErrand) return;
 
     const socket = socketRef.current;
+    if (!socket) return;
 
     socket.emit('join:errand', activeErrand.id);
 
@@ -81,14 +83,14 @@ export default function ClientScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
+      <SafeAreaView style={styles.center} edges={['top', 'left', 'right']}>
         <ActivityIndicator color="#22c55e" />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <Text style={styles.header}>My Errands</Text>
 
       {activeErrand && (
@@ -107,20 +109,32 @@ export default function ClientScreen() {
       <FlatList
         data={errands}
         keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        ListEmptyComponent={
+          <Text style={{ color: 'white', textAlign: 'center', marginTop: 50 }}>
+            No errands yet
+          </Text>
+        }
         renderItem={({ item }) => (
           <View style={styles.card}>
             <Text style={{ color: 'white' }}>{item.title}</Text>
           </View>
         )}
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020617', padding: 20 },
   header: { color: 'white', fontSize: 24, fontWeight: 'bold' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#020617',
+  },
+  listContent: { paddingBottom: 24 },
   card: {
     backgroundColor: '#0f172a',
     padding: 15,

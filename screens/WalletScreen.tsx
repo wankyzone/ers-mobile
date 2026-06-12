@@ -11,6 +11,7 @@ import {
   View,
   Linking,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../src/context/AuthContext';
 import {
@@ -189,24 +190,26 @@ export default function WalletScreen({ setTab }: any) {
 
   if (loading) {
     return (
-      <View style={[s.container, s.centered]}>
+      <SafeAreaView style={[s.container, s.centered]} edges={['top', 'left', 'right']}>
         <ActivityIndicator color="#22c55e" size="large" />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView
-      style={s.container}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => fetchWallet({ refreshing: true })}
-          tintColor="#22c55e"
-        />
-      }
-    >
-      <Text style={s.title}>Wallet</Text>
+    <SafeAreaView style={s.safeArea} edges={['top', 'left', 'right']}>
+      <ScrollView
+        style={s.container}
+        contentContainerStyle={s.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => fetchWallet({ refreshing: true })}
+            tintColor="#22c55e"
+          />
+        }
+      >
+        <Text style={s.title}>Wallet</Text>
 
       {/* Balance */}
       <View style={s.balanceCard}>
@@ -294,14 +297,19 @@ export default function WalletScreen({ setTab }: any) {
       <TouchableOpacity onPress={() => setTab('transactions')}>
         <Text style={s.link}>View Transactions →</Text>
       </TouchableOpacity>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 // ─── Styles ─────────────────────────────────
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617', padding: 20 },
+  safeArea: { flex: 1, backgroundColor: '#020617' },
+
+  container: { flex: 1, backgroundColor: '#020617' },
+
+  content: { padding: 20, paddingBottom: 32 },
 
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 

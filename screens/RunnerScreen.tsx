@@ -17,6 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../src/context/AuthContext';
 import {
@@ -214,14 +215,14 @@ export default function RunnerScreen() {
 
   if (loading) {
     return (
-      <View style={[s.container, s.centered]}>
+      <SafeAreaView style={[s.container, s.centered]} edges={['top', 'left', 'right']}>
         <ActivityIndicator color={C.green} size="large" />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={s.container}>
+    <SafeAreaView style={s.container} edges={['top', 'left', 'right']}>
       {/* HEADER */}
       <View style={s.header}>
         <Text style={s.title}>Available Errands</Text>
@@ -253,7 +254,7 @@ export default function RunnerScreen() {
           />
         }
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
