@@ -11,9 +11,7 @@ import {
 } from 'react-native';
 
 import { useAuth } from '../src/context/AuthContext';
-
-const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+import { apiFetch } from '../src/config/api';
 
 // ─── Types ─────────────────────────
 
@@ -77,22 +75,35 @@ export default function KycScreen({ setTab }: Props) {
 
   useEffect(() => {
     const resolve = async () => {
+      console.log('USER:', user);
+
+      if (!user?.id) {
+        console.warn('User not ready, skipping API call');
+        return;
+      }
+
       if (debouncedAccount.length !== 10 || !form.bank_code) return;
 
       try {
         setResolving(true);
         setResolveError('');
 
-        const res = await fetch(`${BASE_URL}/paystack/resolve-account`, {
+        const { data } = await apiFetch('/paystack/resolve-account', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'x-user-id': user.id,
+            'x-role': user.role,
+          },
           body: JSON.stringify({
             account_number: debouncedAccount,
             bank_code: form.bank_code,
           }),
         });
 
-        const data = await res.json();
+        if (!data) {
+          Alert.alert('Error', 'Invalid server response');
+          return;
+        }
 
         if (data.status) {
           setForm(prev => ({
@@ -110,7 +121,7 @@ export default function KycScreen({ setTab }: Props) {
     };
 
     resolve();
-  }, [debouncedAccount, form.bank_code]);
+  }, [debouncedAccount, form.bank_code, user]);
 
   // ─── Validation ─────────────────
 
@@ -143,7 +154,10 @@ export default function KycScreen({ setTab }: Props) {
   // ─── Submit ─────────────────────
 
   const handleSubmit = async () => {
+    console.log('USER:', user);
+
     if (!user?.id) {
+      console.warn('User not ready, skipping API call');
       return Alert.alert('Error', 'User not authenticated');
     }
 
@@ -154,16 +168,19 @@ export default function KycScreen({ setTab }: Props) {
     try {
       setLoading(true);
 
-      const res = await fetch(`${BASE_URL}/kyc/verify`, {
+      const { data, res } = await apiFetch('/kyc/verify', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           'x-user-id': user.id,
+          'x-role': user.role,
         },
         body: JSON.stringify(form),
       });
 
-      const data = await res.json();
+      if (!data) {
+        Alert.alert('Error', 'Invalid server response');
+        return;
+      }
 
       if (!res.ok) throw new Error(data.message);
 

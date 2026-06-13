@@ -9,34 +9,44 @@ import {
   ActivityIndicator,
 } from 'react-native';
 
-import { withdrawWithPin } from '../src/services/api';
+import { apiFetch } from '../src/config/api';
+import { useAuth } from '../src/context/AuthContext';
 
 interface Props {
   setTab: (tab: string) => void;
 }
 
 export default function OtpScreen({ setTab }: Props) {
+  const { user } = useAuth();
   const [code, setCode] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
   const verify = async () => {
+    console.log('USER:', user);
+
+    if (!user?.id) {
+      console.warn('User not ready, skipping API call');
+      return;
+    }
+
     if (!code) return Alert.alert('Enter OTP');
 
     try {
       setLoading(true);
 
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_API_URL}/otp/verify`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ code }),
-        }
-      );
+      const { data, res } = await apiFetch('/otp/verify', {
+        method: 'POST',
+        headers: {
+          'x-user-id': user.id,
+          'x-role': user.role,
+        },
+        body: JSON.stringify({ code }),
+      });
 
-      const data = await res.json();
+      if (!data) {
+        Alert.alert('Error', 'Invalid server response');
+        return;
+      }
 
       if (!res.ok) {
         throw new Error(data.message);

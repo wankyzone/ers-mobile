@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        if (event === 'SIGNED_IN' && session?.user) {
+        if (session?.user) {
           const u = session.user;
 
           const userData: User = {
@@ -48,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setApiUser(userData);
         }
 
-        if (event === 'SIGNED_OUT') {
+        if (event === 'SIGNED_OUT' || !session?.user) {
           setUser(null);
           setApiUser(null);
         }

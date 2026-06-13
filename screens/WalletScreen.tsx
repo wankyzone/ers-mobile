@@ -14,15 +14,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../src/context/AuthContext';
+import { DEBUG_API, apiFetch } from '../src/config/api';
+import { useApiDebugText } from '../src/hooks/useApiDebugText';
 import {
   withdrawWithPin,
   getUserBanks,
   type BankAccount,
   type ApiError,
 } from '../src/services/api';
-
-const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://100.115.92.197:3000';
 
 // ─── Formatter ─────────────────────────────────
 
@@ -35,6 +34,7 @@ const ngn = new Intl.NumberFormat('en-NG', {
 
 export default function WalletScreen({ setTab }: any) {
   const { user } = useAuth();
+  const debugText = useApiDebugText();
 
   const [wallet, setWallet] = useState({
     balance: 0,
@@ -60,20 +60,29 @@ export default function WalletScreen({ setTab }: any) {
 
   const fetchWallet = useCallback(
     async (opts: { refreshing?: boolean } = {}) => {
-      if (!user?.id) return;
+      console.log('USER:', user);
+
+      if (!user?.id) {
+        console.warn('User not ready, skipping API call');
+        return;
+      }
 
       try {
         opts.refreshing ? setRefreshing(true) : setLoading(true);
         setError(null);
 
-        const res = await fetch(`${BASE_URL}/wallet`, {
+        const { data, res } = await apiFetch('/api/wallet', {
           headers: {
             'x-user-id': user.id,
             'x-role': user.role,
           },
         });
 
-        const data = await res.json();
+        if (!data) {
+          Alert.alert('Error', 'Invalid server response');
+          return;
+        }
+
         if (!res.ok) throw new Error(data?.message);
 
         setWallet({
@@ -87,12 +96,19 @@ export default function WalletScreen({ setTab }: any) {
         setRefreshing(false);
       }
     },
-    [user?.id]
+    [user]
   );
 
   // ─── Fetch Banks ────────────────────────────
 
   const fetchBanks = async () => {
+    console.log('USER:', user);
+
+    if (!user?.id) {
+      console.warn('User not ready, skipping API call');
+      return;
+    }
+
     try {
       const data = await getUserBanks();
       setBanks(data);
@@ -110,6 +126,13 @@ export default function WalletScreen({ setTab }: any) {
   // ─── Add Money ─────────────────────────────
 
   const addMoney = async () => {
+    console.log('USER:', user);
+
+    if (!user?.id) {
+      console.warn('User not ready, skipping API call');
+      return;
+    }
+
     if (!amount || Number(amount) <= 0) {
       return Alert.alert('Invalid amount');
     }
@@ -117,17 +140,24 @@ export default function WalletScreen({ setTab }: any) {
     try {
       setProcessing(true);
 
-      const res = await fetch(`${BASE_URL}/paystack/initialize`, {
+      const { data } = await apiFetch('/paystack/initialize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'x-user-id': user.id,
+          'x-role': user.role,
+        },
         body: JSON.stringify({
-          email: user?.email,
+          email: user.email,
           amount: Number(amount),
-          user_id: user?.id,
+          user_id: user.id,
         }),
       });
 
-      const data = await res.json();
+      if (!data) {
+        Alert.alert('Error', 'Invalid server response');
+        return;
+      }
+
       if (!data.status) throw new Error('Payment failed');
 
       await Linking.openURL(data.data.authorization_url);
@@ -145,6 +175,13 @@ export default function WalletScreen({ setTab }: any) {
   // ─── Withdraw (PIN + OTP FLOW) ─────────────
 
   const withdraw = async () => {
+    console.log('USER:', user);
+
+    if (!user?.id) {
+      console.warn('User not ready, skipping API call');
+      return;
+    }
+
     if (!withdrawAmount || Number(withdrawAmount) <= 0) {
       return Alert.alert('Invalid amount');
     }
@@ -210,6 +247,12 @@ export default function WalletScreen({ setTab }: any) {
         }
       >
         <Text style={s.title}>Wallet</Text>
+
+        {DEBUG_API && !!debugText && (
+          <Text style={{ color: 'white', marginTop: 20 }}>
+            {debugText}
+          </Text>
+        )}
 
       {/* Balance */}
       <View style={s.balanceCard}>

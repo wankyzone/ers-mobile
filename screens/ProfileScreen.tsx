@@ -14,6 +14,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../src/context/AuthContext';
+import { DEBUG_API } from '../src/config/api';
+import { useApiDebugText } from '../src/hooks/useApiDebugText';
 import {
   getClientErrands,
   getTransactions,
@@ -56,6 +58,7 @@ function computeStats(errands: Errand[], tx: Transaction[]) {
 
 export default function ProfileScreen({ setTab }: any) {
   const { user, logout } = useAuth();
+  const debugText = useApiDebugText();
 
   const [stats, setStats] = useState({
     total: 0,
@@ -71,7 +74,12 @@ export default function ProfileScreen({ setTab }: any) {
   // ─── Fetch ─────────────────────
 
   const load = useCallback(async (refresh = false) => {
-    if (!user?.id) return;
+    console.log('USER:', user);
+
+    if (!user?.id) {
+      console.warn('User not ready, skipping API call');
+      return;
+    }
 
     refresh ? setRefreshing(true) : setLoading(true);
 
@@ -94,7 +102,7 @@ export default function ProfileScreen({ setTab }: any) {
 
     setLoading(false);
     setRefreshing(false);
-  }, [user?.id]);
+  }, [user]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -139,6 +147,12 @@ export default function ProfileScreen({ setTab }: any) {
         <View style={s.header}>
           <Text style={s.title}>Profile</Text>
         </View>
+
+        {DEBUG_API && !!debugText && (
+          <Text style={{ color: 'white', marginTop: 20 }}>
+            {debugText}
+          </Text>
+        )}
 
       {/* PROFILE CARD */}
       <View style={s.profileCard}>

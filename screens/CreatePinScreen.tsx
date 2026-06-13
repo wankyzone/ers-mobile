@@ -8,21 +8,37 @@ import {
   Alert,
 } from 'react-native';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+import { apiFetch } from '../src/config/api';
+import { useAuth } from '../src/context/AuthContext';
 
 export default function CreatePinScreen({ setTab }: any) {
+  const { user } = useAuth();
   const [pin, setPin] = useState('');
 
   const handleCreate = async () => {
+    console.log('USER:', user);
+
+    if (!user?.id) {
+      console.warn('User not ready, skipping API call');
+      return;
+    }
+
     if (pin.length !== 4) {
       return Alert.alert('PIN must be 4 digits');
     }
 
-    await fetch(`${BASE_URL}/pin/create`, {
+    const { data } = await apiFetch('/pin/set', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'x-user-id': user.id,
+        'x-role': user.role,
+      },
       body: JSON.stringify({ pin }),
     });
+
+    if (!data) {
+      return Alert.alert('Error', 'Invalid server response');
+    }
 
     Alert.alert('PIN Created');
     setTab('wallet');

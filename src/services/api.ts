@@ -1,5 +1,5 @@
-const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? 'https://ers-api-pdql.onrender.com';
+import { Alert } from 'react-native';
+import { apiFetch } from '../config/api';
 
 // ─── Types ─────────────────────────────────────────
 
@@ -91,7 +91,7 @@ async function request<T>(
 ): Promise<T> {
   const headers = await getHeaders();
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const { data, res } = await apiFetch(path, {
     ...options,
     headers: {
       ...headers,
@@ -99,7 +99,10 @@ async function request<T>(
     },
   });
 
-  const data = await res.json().catch(() => null);
+  if (!data) {
+    Alert.alert('Error', 'Invalid server response');
+    throw new ApiError(res.status, 'Invalid server response');
+  }
 
   if (!res.ok) {
     throw new ApiError(res.status, data?.message || 'Request failed');
@@ -132,9 +135,8 @@ export function getOpenErrands(): Promise<Errand[]> {
 }
 
 export function acceptErrand(id: string): Promise<Errand> {
-  return request(`/errands/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status: 'accepted' }),
+  return request(`/errands/${id}/accept`, {
+    method: 'POST',
   });
 }
 
@@ -169,7 +171,7 @@ export function resolveAccount(
   account_number: string,
   bank_code: string
 ): Promise<AccountResolution> {
-  return request('/paystack/resolve', {
+  return request('/paystack/resolve-account', {
     method: 'POST',
     body: JSON.stringify({ account_number, bank_code }),
   });

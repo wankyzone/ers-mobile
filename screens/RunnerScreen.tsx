@@ -20,6 +20,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../src/context/AuthContext';
+import { DEBUG_API } from '../src/config/api';
+import { useApiDebugText } from '../src/hooks/useApiDebugText';
 import {
   acceptErrand,
   getOpenErrands,
@@ -121,6 +123,7 @@ const ErrandCard = React.memo(function ErrandCard({
 
 export default function RunnerScreen() {
   const { user } = useAuth();
+  const debugText = useApiDebugText();
 
   const [errands, setErrands] = useState<Errand[]>([]);
   const [loading, setLoading] = useState(true);
@@ -134,7 +137,12 @@ export default function RunnerScreen() {
 
   const fetchErrands = useCallback(
     async (opts: { refreshing?: boolean } = {}) => {
-      if (!user?.id) return;
+      console.log('USER:', user);
+
+      if (!user?.id) {
+        console.warn('User not ready, skipping API call');
+        return;
+      }
 
       try {
         opts.refreshing ? setRefreshing(true) : setLoading(true);
@@ -149,7 +157,7 @@ export default function RunnerScreen() {
         setRefreshing(false);
       }
     },
-    [user?.id]
+    [user]
   );
 
   useEffect(() => {
@@ -167,6 +175,13 @@ export default function RunnerScreen() {
         {
           text: 'Accept',
           onPress: async () => {
+            console.log('USER:', user);
+
+            if (!user?.id) {
+              console.warn('User not ready, skipping API call');
+              return;
+            }
+
             acceptLock.current = true;
             setAcceptingId(id);
 
@@ -188,7 +203,7 @@ export default function RunnerScreen() {
         },
       ]);
     },
-    [errands]
+    [errands, user]
   );
 
   // ─── List ───────────────────────
@@ -237,6 +252,12 @@ export default function RunnerScreen() {
       </View>
 
       {error && <Text style={s.error}>{error}</Text>}
+
+      {DEBUG_API && !!debugText && (
+        <Text style={{ color: 'white', marginTop: 20 }}>
+          {debugText}
+        </Text>
+      )}
 
       <FlatList
         data={errands}

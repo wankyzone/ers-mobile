@@ -28,6 +28,13 @@ export default function ClientScreen() {
   // ─── FETCH ─────────────────
 
   useEffect(() => {
+    console.log('USER:', user);
+
+    if (!user?.id) {
+      console.warn('User not ready, skipping API call');
+      return;
+    }
+
     (async () => {
       try {
         const data = await getClientErrands();
@@ -36,7 +43,7 @@ export default function ClientScreen() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [user]);
 
   // ─── ACTIVE ERRAND ─────────────────
 
@@ -72,6 +79,13 @@ export default function ClientScreen() {
   // ─── CONFIRM ─────────────────
 
   const handleConfirm = async (id: string) => {
+    console.log('USER:', user);
+
+    if (!user?.id) {
+      console.warn('User not ready, skipping API call');
+      return;
+    }
+
     const updated = await confirmErrand(id);
 
     setErrands((prev) =>
