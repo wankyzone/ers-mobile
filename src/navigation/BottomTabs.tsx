@@ -1,6 +1,9 @@
 import React, { useCallback } from 'react';
 import { StyleSheet } from 'react-native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import {
+  createBottomTabNavigator,
+  BottomTabNavigationProp,
+} from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ClientScreen from '../../screens/ClientScreen';
@@ -8,7 +11,11 @@ import RunnerScreen from '../../screens/RunnerScreen';
 import WalletScreen from '../../screens/WalletScreen';
 import ProfileScreen from '../../screens/ProfileScreen';
 
-type RootTabParamList = {
+// ─────────────────────────────────────────
+// TYPES (CLEANED)
+// ─────────────────────────────────────────
+
+export type RootTabParamList = {
   Client: undefined;
   Runner: undefined;
   Wallet: undefined;
@@ -26,17 +33,19 @@ const TAB_ROUTES: Record<LegacyTabKey, keyof RootTabParamList> = {
   profile: 'Profile',
 };
 
+// ─────────────────────────────────────────
+// COMPONENT
+// ─────────────────────────────────────────
+
 export default function BottomTabs() {
   const insets = useSafeAreaInsets();
 
   const createSetTab = useCallback(
-    (navigation: any) => (tab: string) => {
-      const routeName = TAB_ROUTES[tab as LegacyTabKey];
-
-      if (routeName) {
+    (navigation: BottomTabNavigationProp<RootTabParamList>) =>
+      (tab: LegacyTabKey) => {
+        const routeName = TAB_ROUTES[tab];
         navigation.navigate(routeName);
-      }
-    },
+      },
     []
   );
 
@@ -58,13 +67,16 @@ export default function BottomTabs() {
         tabBarLabelStyle: styles.tabBarLabel,
       }}
     >
+      {/* ─── MAIN TABS ONLY ─── */}
       <Tab.Screen name="Client" component={ClientScreen} />
       <Tab.Screen name="Runner" component={RunnerScreen} />
+
       <Tab.Screen name="Wallet">
         {({ navigation }) => (
           <WalletScreen setTab={createSetTab(navigation)} />
         )}
       </Tab.Screen>
+
       <Tab.Screen name="Profile">
         {({ navigation }) => (
           <ProfileScreen setTab={createSetTab(navigation)} />
@@ -73,6 +85,10 @@ export default function BottomTabs() {
     </Tab.Navigator>
   );
 }
+
+// ─────────────────────────────────────────
+// STYLES
+// ─────────────────────────────────────────
 
 const styles = StyleSheet.create({
   tabBar: {

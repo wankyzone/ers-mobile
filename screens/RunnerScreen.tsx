@@ -28,6 +28,7 @@ import {
   type ApiError,
   type Errand,
 } from '../src/services/api';
+import { apiFetch } from '../src/config/api';
 
 // ─── Tokens ─────────────────────────
 
@@ -166,45 +167,33 @@ export default function RunnerScreen() {
 
   // ─── Accept ─────────────────────
 
-  const handleAccept = useCallback(
-    (id: string) => {
-      if (acceptLock.current) return;
+  const handleAccept = async (id: string) => {
+  console.log('USER:', user);
 
-      Alert.alert('Accept Errand', 'Take this job?', [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Accept',
-          onPress: async () => {
-            console.log('USER:', user);
+  if (!user?.id) {
+    console.warn('Runner not ready');
+    return;
+  }
 
-            if (!user?.id) {
-              console.warn('User not ready, skipping API call');
-              return;
-            }
+  try {
+    const { data, res } = await apiFetch(`/api/errands/${id}/accept`, {
+      method: 'POST',
+      headers: {
+        'x-runner-id': user.id,
+        'x-user-id': user.id,
+        'x-role': user.role,
+      },
+    });
 
-            acceptLock.current = true;
-            setAcceptingId(id);
+    if (!res.ok) {
+      throw new Error(data?.message || 'Accept failed');
+    }
 
-            const snapshot = errands;
-            setErrands(prev => prev.filter(e => e.id !== id));
-
-            try {
-              await acceptErrand(id);
-            } catch (err) {
-              setErrands(snapshot);
-              setError(
-                (err as ApiError)?.message ?? 'Accept failed'
-              );
-            } finally {
-              acceptLock.current = false;
-              setAcceptingId(null);
-            }
-          },
-        },
-      ]);
-    },
-    [errands, user]
-  );
+    console.log('Accepted:', data);
+  } catch (err) {
+    console.error(err);
+  }
+};
 
   // ─── List ───────────────────────
 

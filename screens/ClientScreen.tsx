@@ -8,16 +8,49 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  useNavigation,
+  CompositeNavigationProp,
+} from '@react-navigation/native';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useAuth } from '../src/context/AuthContext';
 import { getClientErrands, confirmErrand } from '../src/services/api';
 import TrackingMap from '../src/components/TrackingMap';
 import { useSocket } from '../src/hooks/useSocket';
 
+import type { RootTabParamList } from '../src/navigation/BottomTabs';
+import type { RootStackParamList } from '../src/navigation';
+
 const API_URL = process.env.EXPO_PUBLIC_API_URL!;
+
+// ─── NAV TYPE (THIS IS THE FIX) ─────────────────────────
+
+type NavProp = CompositeNavigationProp<
+  BottomTabNavigationProp<RootTabParamList>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
+
+// ─── Tokens ─────────────────────────────────────────
+
+const C = {
+  bg: '#020617',
+  card: '#0f172a',
+  border: '#1e293b',
+  green: '#22c55e',
+  textPri: '#f1f5f9',
+  textSec: '#94a3b8',
+  textMut: '#475569',
+};
+
+// ─── Screen ─────────────────────────────────────────
 
 export default function ClientScreen() {
   const { user } = useAuth();
+
+  // ✅ FIXED NAVIGATION
+  const navigation = useNavigation<NavProp>();
 
   const socketRef = useSocket(API_URL);
 
@@ -25,15 +58,10 @@ export default function ClientScreen() {
   const [runnerLocation, setRunnerLocation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // ─── FETCH ─────────────────
+  // ─── Fetch ─────────────────────────────────────
 
   useEffect(() => {
-    console.log('USER:', user);
-
-    if (!user?.id) {
-      console.warn('User not ready, skipping API call');
-      return;
-    }
+    if (!user?.id) return;
 
     (async () => {
       try {
@@ -45,14 +73,14 @@ export default function ClientScreen() {
     })();
   }, [user]);
 
-  // ─── ACTIVE ERRAND ─────────────────
+  // ─── Active Errand ─────────────────────────────
 
   const activeErrand = useMemo(
     () => errands.find((e) => e.status === 'accepted'),
     [errands]
   );
 
-  // ─── SOCKET TRACKING ─────────────────
+  // ─── Socket Tracking ───────────────────────────
 
   useEffect(() => {
     if (!activeErrand) return;
@@ -76,15 +104,10 @@ export default function ClientScreen() {
     };
   }, [activeErrand]);
 
-  // ─── CONFIRM ─────────────────
+  // ─── Confirm ───────────────────────────────────
 
   const handleConfirm = async (id: string) => {
-    console.log('USER:', user);
-
-    if (!user?.id) {
-      console.warn('User not ready, skipping API call');
-      return;
-    }
+    if (!user?.id) return;
 
     const updated = await confirmErrand(id);
 
@@ -93,45 +116,67 @@ export default function ClientScreen() {
     );
   };
 
-  // ─── UI ─────────────────
+  // ─── Loading ───────────────────────────────────
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.center} edges={['top', 'left', 'right']}>
-        <ActivityIndicator color="#22c55e" />
+      <SafeAreaView style={styles.center}>
+        <ActivityIndicator color={C.green} />
       </SafeAreaView>
     );
   }
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <Text style={styles.header}>My Errands</Text>
+  // ─── UI ────────────────────────────────────────
 
+  return (
+    <SafeAreaView style={styles.container}>
+      
+      {/* HEADER */}
+      <View style={styles.header}>
+        <Text style={styles.headerText}>My Errands</Text>
+
+        {/* ✅ NOW WORKS PERFECTLY */}
+        <TouchableOpacity
+          style={styles.createBtn}
+          onPress={() => navigation.navigate('CreateErrand')}
+        >
+          <Text style={styles.createBtnText}>+ Create</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* TRACKING */}
       {activeErrand && (
         <>
           <TrackingMap runnerLocation={runnerLocation} />
 
           <TouchableOpacity
-            style={styles.btn}
+            style={styles.confirmBtn}
             onPress={() => handleConfirm(activeErrand.id)}
           >
-            <Text style={{ color: 'white' }}>Confirm Delivery</Text>
+            <Text style={styles.confirmBtnText}>Confirm Delivery</Text>
           </TouchableOpacity>
         </>
       )}
 
+      {/* LIST */}
       <FlatList
         data={errands}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          <Text style={{ color: 'white', textAlign: 'center', marginTop: 50 }}>
-            No errands yet
-          </Text>
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>No errands yet</Text>
+            <Text style={styles.emptyHint}>
+              Tap + Create to post your first one
+            </Text>
+          </View>
         }
         renderItem={({ item }) => (
           <View style={styles.card}>
-            <Text style={{ color: 'white' }}>{item.title}</Text>
+            <Text style={styles.cardTitle}>{item.title}</Text>
+            {!!item.status && (
+              <Text style={styles.cardStatus}>{item.status}</Text>
+            )}
           </View>
         )}
       />
@@ -139,27 +184,90 @@ export default function ClientScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617', padding: 20 },
-  header: { color: 'white', fontSize: 24, fontWeight: 'bold' },
+  container: { flex: 1, backgroundColor: C.bg, padding: 20 },
   center: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#020617',
+    backgroundColor: C.bg,
   },
   listContent: { paddingBottom: 24 },
-  card: {
-    backgroundColor: '#0f172a',
-    padding: 15,
-    marginVertical: 5,
+
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+
+  headerText: {
+    color: C.textPri,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+
+  createBtn: {
+    backgroundColor: C.green,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 10,
   },
-  btn: {
-    backgroundColor: '#22c55e',
+
+  createBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+
+  confirmBtn: {
+    backgroundColor: C.green,
     padding: 12,
     marginVertical: 10,
     borderRadius: 10,
     alignItems: 'center',
+  },
+
+  confirmBtnText: {
+    color: 'white',
+    fontWeight: '700',
+  },
+
+  card: {
+    backgroundColor: C.card,
+    padding: 15,
+    marginVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+
+  cardTitle: {
+    color: C.textPri,
+    fontWeight: '600',
+  },
+
+  cardStatus: {
+    color: C.green,
+    fontSize: 12,
+  },
+
+  empty: {
+    flex: 1,
+    alignItems: 'center',
+    marginTop: 60,
+  },
+
+  emptyTitle: {
+    color: C.textSec,
+    fontWeight: '600',
+  },
+
+  emptyHint: {
+    color: C.textMut,
+    marginTop: 6,
   },
 });
